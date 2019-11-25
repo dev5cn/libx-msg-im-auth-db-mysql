@@ -3,7 +3,6 @@ cmake_minimum_required(VERSION 2.8.12.2)
 ADD_DEFINITIONS(-DLINUX)
 #
 INCLUDE_DIRECTORIES(../libmisc-cpp)
-INCLUDE_DIRECTORIES(../libmisc-kafka-c)
 INCLUDE_DIRECTORIES(../libxsc-cpp)
 INCLUDE_DIRECTORIES(../libxsc-proto-cpp)
 INCLUDE_DIRECTORIES(../libx-msg-im-xsc)
