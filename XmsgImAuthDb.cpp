@@ -39,6 +39,7 @@ XmsgImAuthDb* XmsgImAuthDb::instance()
 
 bool XmsgImAuthDb::load()
 {
+	this->setupDbThread();
 	auto& cfg = XmsgImAuthCfg::instance()->cfgPb->mysql();
 	if (!MysqlConnPool::instance()->init(cfg.host(), cfg.port(), cfg.db(), cfg.usr(), cfg.password(), cfg.poolsize()))
 		return false;
@@ -53,7 +54,6 @@ bool XmsgImAuthDb::load()
 	if (!XmsgImAuthTokenCollOper::instance()->load(XmsgImAuthAccountTokenMgr::loadCb))
 		return false;
 	LOG_INFO("load %s.%s successful, count: %zu, elap: %dms", cfg.db().c_str(), XmsgImAuthDb::xmsgImAuthTokenColl.c_str(), XmsgImAuthAccountTokenMgr::instance()->size(), DateMisc::elapDida(sts))
-	this->abst.reset(new ActorBlockingSingleThread("auth-db"));
 	return true;
 }
 
@@ -70,6 +70,19 @@ bool XmsgImAuthDb::initCfg()
 	LOG_INFO("got a x-msg-im-auth config from db: %s", coll->toString().c_str())
 	XmsgImAuthCfg::instance()->cfgPb = coll->cfg;
 	return true;
+}
+
+void XmsgImAuthDb::setupDbThread()
+{
+	this->abst.reset(new ActorBlockingSingleThread("auth-db"));
+	this->abstTokenSave.reset(new ActorBlockingSingleThread("token-save"));
+	this->abstTokenSave->future([]
+	{
+		while(true)
+		{
+			XmsgImAuthTokenCollOper::instance()->loop();
+		}
+	});
 }
 
 XmsgImAuthDb::~XmsgImAuthDb()

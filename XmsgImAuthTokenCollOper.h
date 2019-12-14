@@ -22,20 +22,32 @@
 
 #include <libx-msg-im-auth-core.h>
 
+typedef struct
+{
+	shared_ptr<XmsgImAuthTokenColl> coll;
+	function<void(int ret, const string& desc)> cb;
+} x_msg_im_auth_token; 
+
 class XmsgImAuthTokenCollOper
 {
 public:
 	bool load(void (*loadCb)(shared_ptr<XmsgImAuthTokenColl> coll)); 
 	bool insert(shared_ptr<XmsgImAuthTokenColl> coll); 
 	bool insert(void* conn, shared_ptr<XmsgImAuthTokenColl> coll); 
+	void saveToken(shared_ptr<XmsgImAuthTokenColl> coll, function<void(int ret, const string& desc)> cb); 
+	void loop(); 
 	bool delExpired(); 
 	void job2deleteExpiredToken(ullong now); 
 	static XmsgImAuthTokenCollOper* instance();
 private:
 	ullong lastDeleteExpiredTokenTs; 
+	queue<shared_ptr<x_msg_im_auth_token>> tokenQueue; 
+	mutex lock4tokenQueue; 
+	condition_variable cond4tokenQueue; 
 	static XmsgImAuthTokenCollOper* inst;
 	bool delExpired(void* conn); 
 	shared_ptr<XmsgImAuthTokenColl> loadOneFromIter(void* it); 
+	void insertBatch(const list<shared_ptr<x_msg_im_auth_token>>& lis, int& ret, string& desc); 
 	XmsgImAuthTokenCollOper();
 	virtual ~XmsgImAuthTokenCollOper();
 };

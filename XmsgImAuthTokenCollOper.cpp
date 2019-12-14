@@ -108,6 +108,104 @@ bool XmsgImAuthTokenCollOper::insert(void* conn, shared_ptr<XmsgImAuthTokenColl>
 	});
 }
 
+void XmsgImAuthTokenCollOper::saveToken(shared_ptr<XmsgImAuthTokenColl> coll, function<void(int ret, const string& desc)> cb)
+{
+	shared_ptr<x_msg_im_auth_token> xmiat(new x_msg_im_auth_token());
+	xmiat->coll = coll;
+	xmiat->cb = cb;
+	unique_lock<mutex> lock(this->lock4tokenQueue);
+	bool nll = this->tokenQueue.empty();
+	this->tokenQueue.push(xmiat);
+	if (nll)
+		this->cond4tokenQueue.notify_one(); 
+}
+
+void XmsgImAuthTokenCollOper::loop()
+{
+	list<shared_ptr<x_msg_im_auth_token>> lis;
+	unique_lock<mutex> lock(this->lock4tokenQueue);
+	while (!this->tokenQueue.empty())
+	{
+		auto xmiat = this->tokenQueue.front();
+		this->tokenQueue.pop();
+		lis.push_back(xmiat);
+		if (lis.size() < XmsgImAuthCfg::instance()->cfgPb->misc().tokensavebatchsize())
+			continue;
+		break;
+	}
+	if (lis.empty())
+	{
+		this->cond4tokenQueue.wait(lock);
+		return;
+	}
+	lock.unlock();
+	ullong sts = DateMisc::dida();
+	int ret = 0;
+	string desc;
+	this->insertBatch(lis, ret, desc);
+	for (auto& it : lis)
+		it->cb(ret, desc);
+	LOG_DEBUG("insert batch size: %zu, elap: %dms, ret: %d, desc: %s", lis.size(), DateMisc::elapDida(sts), ret, desc.c_str())
+}
+
+void XmsgImAuthTokenCollOper::insertBatch(const list<shared_ptr<x_msg_im_auth_token>>& lis, int& ret, string& desc)
+{
+	MYSQL* conn = MysqlConnPool::instance()->getConn();
+	if (conn == NULL)
+	{
+		ret = RET_EXCEPTION;
+		desc = "can not get connection from pool";
+		LOG_ERROR("can not get connection from pool, size: %zu", lis.size())
+		return;
+	}
+	if (!MysqlMisc::start(conn))
+	{
+		ret = RET_EXCEPTION;
+		desc = "start transaction failed";
+		LOG_ERROR("start transaction failed, err: %s, size: %zu", ::mysql_error(conn), lis.size())
+		MysqlConnPool::instance()->relConn(conn, false);
+		return;
+	}
+	string sql;
+	SPRINTF_STRING(&sql, "insert into %s values (?, ?, ?, ?, ?, ?, ?)", XmsgImAuthDb::xmsgImAuthTokenColl.c_str())
+	shared_ptr<MysqlCrudReq> req(new MysqlCrudReq(sql));
+	for (auto& it : lis)
+	{
+		req->addRow() 
+		->addVarchar(it->coll->token) 
+		->addVarchar(it->coll->usr) 
+		->addVarchar(it->coll->cgt->toString()) 
+		->addVarchar(it->coll->secret) 
+		->addDateTime(it->coll->gts) 
+		->addDateTime(it->coll->expired) 
+		->addBlob(it->coll->info->SerializeAsString());
+	}
+	int affected = 0;
+	if (!MysqlMisc::sql(conn, req, ret, desc, &affected))
+	{
+		ret = RET_EXCEPTION;
+		desc = "insert batch failed";
+		LOG_ERROR("insert many into %s failed, err: %s, size: %zu", XmsgImAuthDb::xmsgImAuthTokenColl.c_str(), desc.c_str(), lis.size())
+		MysqlMisc::rollBack(conn);
+		MysqlConnPool::instance()->relConn(conn, false);
+		return;
+	}
+	if (affected != (int) lis.size())
+	{
+		LOG_FAULT("it`s a bug, affected: %d, size: %zu", affected, lis.size())
+	}
+	if (!MysqlMisc::commit(conn))
+	{
+		ret = RET_EXCEPTION;
+		desc = "commit transaction failed";
+		LOG_ERROR("commit transaction failed, err: %s, size: %zu", ::mysql_error(conn), lis.size())
+		MysqlMisc::rollBack(conn);
+		MysqlConnPool::instance()->relConn(conn, false);
+		return;
+	}
+	MysqlConnPool::instance()->relConn(conn);
+}
+
 bool XmsgImAuthTokenCollOper::delExpired()
 {
 	MYSQL* conn = MysqlConnPool::instance()->getConn();

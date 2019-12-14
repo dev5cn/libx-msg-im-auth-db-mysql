@@ -34,8 +34,10 @@ public:
 	static string xmsgImAuthTokenColl; 
 private:
 	shared_ptr<ActorBlockingSingleThread> abst; 
+	shared_ptr<ActorBlockingSingleThread> abstTokenSave; 
 	static XmsgImAuthDb* inst;
 	bool initCfg(); 
+	void setupDbThread(); 
 	XmsgImAuthDb();
 	virtual ~XmsgImAuthDb();
 };
